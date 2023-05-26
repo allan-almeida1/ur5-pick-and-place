@@ -27,8 +27,10 @@ on the image, and it is trained with a dataset of 5000 images.
 
 1. Open CoppeliaSim and load the scene `UR5.ttt`
 2. Create a virtual environment and install the dependencies from `requirements.txt`
-   1. `python3 -m venv venv`
-   2. `source venv/bin/activate`
-   3. `pip install -r requirements.txt`
+    ```
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+    ```
 3. Open the Jupyter Notebook `Trabalho.ipynb` and run the first cell to import the dependencies and start the simulation
 4. Run the other cells, one by one, to see the robot in action
