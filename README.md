@@ -34,3 +34,6 @@ on the image, and it is trained with a dataset of 5000 images.
     ```
 3. Open the Jupyter Notebook `Trabalho.ipynb` and run the first cell to import the dependencies and start the simulation
 4. Run the other cells, one by one, to see the robot in action
+5. You can use the functions from `ur5.py` to control the robot and perform other tasks you want
+
+Have fun! :sparkles: :robot:
