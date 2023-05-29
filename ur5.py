@@ -500,54 +500,31 @@ class UR5:
         """
             Close the Robotiq_85 gripper
         """
-        # index = 0
-        # while True:
-        #     shape = self.sim.getObjects(index, self.sim.object_shape_type)
-        #
-        #     if shape == -1:
-        #         break
-        #     elif (self.sim.getObjectInt32Param(shape, self.sim.shapeintparam_static) == 0) and \
-        #             (self.sim.getObjectInt32Param(shape, self.sim.shapeintparam_respondable) != 0) and \
-        #             (self.sim.checkProximitySensor(self.objectSensor, shape)[0] == 1):
-        #         object_name = self.sim.getObjectName(shape)
-        #         print('Object detected: ' + object_name)
-        #         self.attached_shape = shape
-        #         # Do the connection:
-        #         self.sim.setObjectParent(
-        #             self.attached_shape, self.connector, True)
-        #         break
-        #     print('-'*10)
-        #     print('Shape: ', shape)
-        #     print('Name: ', self.sim.getObjectName(shape))
-        #     print('Static: ', self.sim.getObjectInt32Param(shape, self.sim.shapeintparam_static))
-        #     print('Respondable: ', self.sim.getObjectInt32Param(shape, self.sim.shapeintparam_respondable))
-        #     print('Proximity: ', self.sim.checkProximitySensor(self.objectSensor, shape))
-        #     print('-'*10)
-        #     index += 1
-        self.sim.setJointTargetVelocity(self.finger_handles[0], -0.02)
-        self.sim.setJointTargetVelocity(self.finger_handles[1], -0.02)
-        while True:
-            if self.sim.getJointForce(self.finger_handles[0]) > 9 and \
-                    self.sim.getJointForce(self.finger_handles[1]) > 9:
-                self.sim.setJointTargetVelocity(self.finger_handles[0], 0)
-                self.sim.setJointTargetVelocity(self.finger_handles[1], 0)
-                break
+        p1 = self.sim.getJointPosition(self.finger_handles[0])
+        p2 = self.sim.getJointPosition(self.finger_handles[1])
+        while p1 < p2 - 0.008:
+            self.sim.setJointTargetVelocity(self.finger_handles[0], -0.01)
+            self.sim.setJointTargetVelocity(self.finger_handles[1], -0.04)
+            time.sleep(0.01)
+        self.sim.setJointTargetVelocity(self.finger_handles[0], -0.04)
+        self.sim.setJointTargetVelocity(self.finger_handles[1], -0.04)
+        time.sleep(1.3)
 
     def open_gripper(self):
         """
             Open the Robotiq_85 gripper
         """
-        if self.attached_shape != -1:
-            self.sim.setObjectParent(self.attached_shape, -1, True)
-        self.sim.setJointTargetVelocity(self.finger_handles[0], 0.02)
-        self.sim.setJointTargetVelocity(self.finger_handles[1], 0.02)
-        while True:
-            if self.sim.getJointForce(self.finger_handles[0]) < -9 and \
-                    self.sim.getJointForce(self.finger_handles[1]) < -9:
-                self.sim.setJointTargetVelocity(self.finger_handles[0], 0)
-                self.sim.setJointTargetVelocity(self.finger_handles[1], 0)
-                break
-        self.attached_shape = -1
+        p1 = self.sim.getJointPosition(self.finger_handles[0])
+        p2 = self.sim.getJointPosition(self.finger_handles[1])
+        if p1 < p2:
+            self.sim.setJointTargetVelocity(self.finger_handles[0], 0.04)
+            self.sim.setJointTargetVelocity(self.finger_handles[1], 0.02)
+            print('if')
+        else:
+            self.sim.setJointTargetVelocity(self.finger_handles[0], 0.02)
+            self.sim.setJointTargetVelocity(self.finger_handles[1], 0.04)
+            print('else')
+        time.sleep(1.5)
 
 
 def get_dataset(folder='machine_learning/img/'):
