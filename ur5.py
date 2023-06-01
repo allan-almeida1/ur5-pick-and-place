@@ -21,6 +21,7 @@ import json
 from math import sin, cos
 from functools import reduce
 from matplotlib import pyplot as plt
+from keras.models import load_model
 
 PI = math.pi
 
@@ -578,11 +579,9 @@ class UR5:
         if p1 < p2:
             self.sim.setJointTargetVelocity(self.finger_handles[0], 0.04)
             self.sim.setJointTargetVelocity(self.finger_handles[1], 0.02)
-            print('if')
         else:
             self.sim.setJointTargetVelocity(self.finger_handles[0], 0.02)
             self.sim.setJointTargetVelocity(self.finger_handles[1], 0.04)
-            print('else')
         time.sleep(1.5)
 
 
@@ -597,7 +596,7 @@ def get_dataset(folder='machine_learning/img/'):
             data (list): list of json objects with keys ('x', 'y', 'x_img', 'y_img', 'raw_file')
     """
     data = []
-    with open(folder + 'grount_truth.json', 'r') as f:
+    with open(folder + 'ground_truth.json', 'r') as f:
         for line in f:
             data.append(json.loads(line))
     return data
@@ -609,10 +608,16 @@ class ComputerVision:
         """
             Initialize variables
         """
+        self.model = None
         client = RemoteAPIClient()
         self.sim = client.getObject('sim')
         self._get_handles()
         self.folder = 'machine_learning/img/'
+        self.x_range = [0.1, -0.24]
+        self.y_range = [-0.83, -0.55]
+        self.x_img_range = [52, 184]
+        self.y_img_range = [52, 161]
+        self.z_cup = 0.05797996154999335
 
     def _get_handles(self):
         """
@@ -635,17 +640,13 @@ class ComputerVision:
             self.folder = folder
         with open(self.folder + 'grount_truth.json', 'w') as f:
             for i in range(size):
-                x = [0.1, -0.24]
-                X = np.linspace(x[0], x[1], 100)
-                y = [-0.83, -0.55]
-                Y = np.linspace(y[0], y[1], 100)
-                x_img = [52, 184]
-                X_img = np.linspace(x_img[0], x_img[1], 100)
-                y_img = [52, 161]
-                Y_img = np.linspace(y_img[0], y_img[1], 100)
+                X = np.linspace(self.x_range[0], self.x_range[1], 100)
+                Y = np.linspace(self.y_range[0], self.y_range[1], 100)
+                X_img = np.linspace(self.x_img_range[0], self.x_img_range[1], 100)
+                Y_img = np.linspace(self.y_img_range[0], self.y_img_range[1], 100)
                 xc, yc = np.random.randint(0, 99, 2)
                 self.sim.getObjectPosition(self.cup, self.frame0)
-                self.sim.setObjectPosition(self.cup, self.frame0, [X[xc], Y[yc], 0.05797996154999335])
+                self.sim.setObjectPosition(self.cup, self.frame0, [X[xc], Y[yc], self.z_cup])
                 img, resX, resY = self.sim.getVisionSensorCharImage(self.camera)
                 img = np.frombuffer(img, dtype=np.uint8).reshape((resY, resX, 3))
                 img = np.flip(img, axis=0)
@@ -660,27 +661,59 @@ class ComputerVision:
             Returns:
                 p (list[float]): cup position
         """
-        x = [0.1, -0.24]
-        X = np.linspace(x[0], x[1], 100)
-        y = [-0.83, -0.55]
-        Y = np.linspace(y[0], y[1], 100)
-        x_img = [52, 184]
-        X_img = np.linspace(x_img[0], x_img[1], 100)
-        y_img = [52, 161]
-        Y_img = np.linspace(y_img[0], y_img[1], 100)
+        X = np.linspace(self.x_range[0], self.x_range[1], 100)
+        Y = np.linspace(self.y_range[0], self.y_range[1], 100)
         xc, yc = np.random.randint(0, 99, 2)
         self.sim.getObjectPosition(self.cup, self.frame0)
-        self.sim.setObjectPosition(self.cup, self.frame0, [X[xc], Y[yc], 0.05797996154999335])
+        self.sim.setObjectPosition(self.cup, self.frame0, [X[xc], Y[yc], self.z_cup])
         img, resX, resY = self.sim.getVisionSensorCharImage(self.camera)
         img = np.frombuffer(img, dtype=np.uint8).reshape((resY, resX, 3))
         img = np.flip(img, axis=0)
         img1 = img.copy()
-        limits = [(x_img[0], y_img[0]), (x_img[1], y_img[0]), (x_img[1], y_img[1]), (x_img[0], y_img[1])]
+        limits = [(self.x_img_range[0], self.y_img_range[0]),
+                  (self.x_img_range[1], self.y_img_range[0]),
+                  (self.x_img_range[1], self.y_img_range[1]),
+                  (self.x_img_range[0], self.y_img_range[1])]
         for i in range(2):
             for j in range(2):
                 cv2.polylines(img1, np.int32([limits]), isClosed=True, color=(0, 255, 0), thickness=1)
-        cv2.circle(img1, (int(X_img[xc]), int(Y_img[yc])), 3, (0, 0, 255), -1)
         plt.imshow(img1)
         plt.show()
         return np.array(self.sim.getObjectPosition(self.cup, self.frame0))
+
+    def load_model(self, model_path='machine_learning/cup_position_model.h5'):
+        """
+            Load the trained model
+
+            Parameters:
+                model_path (string): path to the model h5 file
+        """
+        self.model = load_model(model_path)
+
+    def predict(self):
+        """
+            Predict the cup position
+
+            Returns:
+                p (np.ndarray): cup position
+        """
+        img, resX, resY = self.sim.getVisionSensorCharImage(self.camera)
+        img = np.frombuffer(img, dtype=np.uint8).reshape((resY, resX, 3))
+        img = np.flip(img, axis=0)
+        img = img / 255.0
+        input_img = np.expand_dims(img, axis=0)
+        prediction = self.model.predict(input_img)
+        prediction = prediction.astype(int)
+        x = prediction[0][0]
+        y = prediction[0][1]
+        img1 = img.copy()
+        img1 = cv2.circle(img1, (x, y), 3, (255, 0, 0), -1)
+        plt.imshow(img1)
+        x_normalized = (x - self.x_img_range[0]) / (self.x_img_range[1] - self.x_img_range[0])
+        y_normalized = (y - self.y_img_range[0]) / (self.y_img_range[1] - self.y_img_range[0])
+        x_real = self.x_range[0] + x_normalized * (self.x_range[1] - self.x_range[0])
+        y_real = self.y_range[0] + y_normalized * (self.y_range[1] - self.y_range[0])
+        z_real = self.z_cup
+        cup_position = np.array([x_real, y_real, z_real])
+        return cup_position
 
