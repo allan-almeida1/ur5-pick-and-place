@@ -225,7 +225,7 @@ class UR5:
                                 [0, 0, 0, 1]]) for i in range(6)])
 
         T = reduce(np.dot, A)
-        return T
+        return T, A
 
     def transform(self, theta: 'int | float', idx):
         """
@@ -401,7 +401,54 @@ class UR5:
                 self.sim.getJointPosition(handle))
         return angles
 
-    def move_to_config(self, target: 'list[float | int]', duration=None, graph=False):
+    def get_jacobian(self, velocities: np.ndarray = None):
+        """
+            Calculate Jacobian and get the end-effector velocities (linear and angular)
+            from the joint velocities
+
+            Parameters:
+                velocities (np.ndarray): do not assign any values when using as standalone
+                function
+
+            Returns:
+                qsi (np.ndarray): 6x1 vector containing 3 linear velocities (x, y, z) and
+                3 angular velocities (x, y, z)
+        """
+        angles = self.get_joint_angles(self.joint_handles)
+        if velocities is None:
+            velocities = np.array([self.sim.getJointVelocity(j) for j in self.joint_handles]).reshape((6,1))
+        _, A = self.forward_kinematics(angles)
+        A10 = A[0]
+        A20 = np.dot(A[0], A[1])
+        A30 = np.dot(A20, A[2])
+        A40 = np.dot(A30, A[3])
+        A50 = np.dot(A40, A[4])
+        A60 = np.dot(A50, A[5])
+        Z0 = np.array([[0, 0, 1]]).T
+        Z1 = A10[:3, 2].reshape(3, 1)
+        Z2 = A20[:3, 2].reshape(3, 1)
+        Z3 = A30[:3, 2].reshape(3, 1)
+        Z4 = A40[:3, 2].reshape(3, 1)
+        Z5 = A50[:3, 2].reshape(3, 1)
+        O0 = np.zeros((3,1))
+        O1 = A10[:3, 3].reshape(3, 1)
+        O2 = A20[:3, 3].reshape(3, 1)
+        O3 = A30[:3, 3].reshape(3, 1)
+        O4 = A40[:3, 3].reshape(3, 1)
+        O5 = A50[:3, 3].reshape(3, 1)
+        O6 = A60[:3, 3].reshape(3, 1)
+        Jw = np.hstack((Z0, Z1, Z2, Z3, Z4, Z5))
+        Jv = np.hstack((np.cross(Z0.T, (O6-O0).T).T,
+                        np.cross(Z1.T, (O6-O1).T).T,
+                        np.cross(Z2.T, (O6-O2).T).T,
+                        np.cross(Z3.T, (O6-O3).T).T,
+                        np.cross(Z4.T, (O6-O4).T).T,
+                        np.cross(Z5.T, (O6-O5).T).T,))
+        J = np.vstack((Jv, Jw))
+        qsi = np.dot(J, velocities)
+        return qsi
+
+    def move_to_config(self, target: 'list[float | int]', duration=None, graph=False, jacob=False):
         """
             Move to configuration using quintic trajectory
 
@@ -412,6 +459,8 @@ class UR5:
 
                 graph: whether to plot the trajectory
 
+                jacob: wheter to calculate and return jacobian
+
             Returns:
                 duration: time to reach target in seconds
 
@@ -420,6 +469,8 @@ class UR5:
                 mean_error: mean final joint error in degrees
 
                 graphs: list of graphs if graph=True
+
+                jacob: linear and angular end-effector velocities
             """
         target = [limit_angle(t) for t in target]
         t0 = self.sim.getSimulationTime()
@@ -444,6 +495,8 @@ class UR5:
         x = [np.linalg.solve(A, b[:, i]) for i in range(len(self.joint_handles))]
         time0 = self.sim.getSimulationTime()
         iterations = 0
+        end_effector_vel = []
+        vel_jacob = [[], [], [], [], [], []]
         pos = [[], [], [], [], [], []]
         vel = [[], [], [], [], [], []]
         acc = [[], [], [], [], [], []]
@@ -468,6 +521,12 @@ class UR5:
                     vel[idx].append(v)
                     acc[idx].append(a)
                     jerk[idx].append(j)
+                if jacob:
+                    idx = self.joint_handles.index(joint_handle)
+                    v = x[idx][1] + 2*x[idx][2]*t + 3*x[idx][3]*t**2 + 4*x[idx][4]*t**3 + 5*x[idx][5]*t**4
+                    vel_jacob[idx].append(v)
+            if jacob:
+                end_effector_vel.append(self.get_jacobian(velocities=np.array([vj[-1] for vj in vel_jacob]).reshape((6, 1))))
             time.sleep(0.001)
             iterations += 1
         for joint_handle in self.joint_handles:
@@ -475,7 +534,7 @@ class UR5:
         timef = self.sim.getSimulationTime()
         error = np.abs(np.array(target) - self.get_joint_angles(self.joint_handles))*180/np.pi
         print('Iterações totais: ', iterations)
-        return timef-time0, np.max(error), np.mean(error), (pos, vel, acc, jerk, time_arr)
+        return timef-time0, np.max(error), np.mean(error), (pos, vel, acc, jerk, time_arr), end_effector_vel
 
     def move_to_pose(self, pos: 'np.ndarray', rot: 'np.ndarray', wrist='down', duration=None):
         """
