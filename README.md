@@ -14,8 +14,16 @@ and place it on another table.
 
 The computer vision part of the project is implemented via a CNN. The CNN is trained
 to detect the cup position on the image. The CNN is implemented in Tensorflow and Keras, 
-and it uses a VGG16 pre-trained model as a base. The CNN is modified to output the cup position
-on the image, and it is trained with a dataset of 5000 images.
+and it uses a VGG16 pre-trained model as a base. The CNN is modified to predict the cup
+relative to the image and convert it to the real XYZ coordinates, and it is trained 
+with a dataset of 5000 images.
+
+Resulting metrics of the CNN:
+
+| Accuracy | R2 Score | MAE | MAE x | MAE y | Max Error x | Max Error y |
+|----------|----------|-----|-------|-------|-------------|-------------|
+| 0.9912   | 0.996    | 1.694 px | 2.054 px | 1.335 px | 10.1 px  | 8.8 px   |
+
 
 ## Dependencies
 
