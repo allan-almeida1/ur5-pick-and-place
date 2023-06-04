@@ -113,6 +113,201 @@ def build_matrix(pos: 'np.ndarray', rot: 'np.ndarray'):
     return R
 
 
+def forward_kinematics(theta: 'list[float | int] | np.ndarray'):
+    """
+        Defines Denavit-Hartenberger parameters for UR5 and calculates
+        forward kinematics
+
+        Parameters:
+            theta (list[float | int]): joint angles in radians
+
+        Returns:
+            T (tuple[np.ndarray, np.ndarray]): total transformation matrix and
+            transformation matrices for each joint
+    """
+    d1 = 0.089159
+    a2 = 0.425
+    a3 = 0.39225
+    d4 = 0.10915
+    d5 = 0.09465
+    d6 = 0.17591
+    dh_table = np.array([[0, PI/2, d1, 0],
+                         [a2, 0, 0, PI/2],
+                         [a3, 0, 0, 0],
+                         [0, -PI/2, d4, -PI/2],
+                         [0, PI/2, d5, 0],
+                         [0, 0, d6, 0]])
+
+    A = np.array([np.array([[cos(theta[i]+dh_table[i][3]),
+                             -sin(theta[i]+dh_table[i][3]) *
+                             cos(dh_table[i][1]),
+                             sin(theta[i]+dh_table[i][3]) *
+                             sin(dh_table[i][1]),
+                             dh_table[i][0]*cos(theta[i]+dh_table[i][3])],
+                            [sin(theta[i]+dh_table[i][3]),
+                             cos(theta[i]+dh_table[i][3]) *
+                             cos(dh_table[i][1]),
+                             -cos(theta[i]+dh_table[i][3]) *
+                             sin(dh_table[i][1]),
+                             dh_table[i][0]*sin(theta[i]+dh_table[i][3])],
+                            [0, sin(dh_table[i][1]),
+                             cos(dh_table[i][1]),
+                             dh_table[i][2]],
+                            [0, 0, 0, 1]]) for i in range(6)])
+
+    T = reduce(np.dot, A)
+    return T, A
+
+
+def transform(theta: 'int | float', idx):
+    """
+        Calculate the transformation matrix between two consecutive frames
+
+        Ex: T_0_1, T_1_2, T_2_3, T_3_4, T_4_5, T_5_6
+
+        Parameters:
+            theta (float | int): joint angle in radians
+            idx (int): index of the transformation matrix
+
+        Returns:
+            T (np.array): transformation matrix
+    """
+    d1 = 0.089159
+    a2 = 0.425
+    a3 = 0.39225
+    d4 = 0.10915
+    d5 = 0.09465
+    d6 = 0.17591
+    dh_table = np.array([[0, PI/2, d1, 0],
+                         [a2, 0, 0, PI/2],
+                         [a3, 0, 0, 0],
+                         [0, -PI/2, d4, -PI/2],
+                         [0, PI/2, d5, 0],
+                         [0, 0, d6, 0]])
+
+    th = np.array([[cos(theta+dh_table[idx][3]),
+                    -sin(theta+dh_table[idx][3]) *
+                    cos(dh_table[idx][1]),
+                    sin(theta+dh_table[idx][3]) *
+                    sin(dh_table[idx][1]),
+                    dh_table[idx][0]*cos(theta+dh_table[idx][3])],
+                   [sin(theta+dh_table[idx][3]),
+                    cos(theta+dh_table[idx][3]) *
+                    cos(dh_table[idx][1]),
+                    -cos(theta+dh_table[idx][3]) *
+                    sin(dh_table[idx][1]),
+                    dh_table[idx][0]*sin(theta+dh_table[idx][3])],
+                   [0, sin(dh_table[idx][1]),
+                    cos(dh_table[idx][1]),
+                    dh_table[idx][2]],
+                   [0, 0, 0, 1]])
+    return th
+
+
+def inverse_kinematics(th: 'np.ndarray', shoulder='left', wrist='down', elbow='up'):
+    """
+        Calculates inverse kinematics for UR5
+
+        Parameters:
+            th (np.ndarray): transformation matrix
+            shoulder (str): 'left' or 'right'
+            wrist (str): 'up' or 'down'
+            elbow (str): 'up' or 'down'
+
+        Returns:
+            theta (list[float]): joint angles in radians
+    """
+    a2 = 0.425
+    a3 = 0.39225
+    d4 = 0.10915
+    d6 = 0.17591
+    o5 = th.dot(np.array([[0, 0, -d6, 1]]).T)
+    xc, yc, zc = o5[0][0], o5[1][0], o5[2][0]
+
+    # Theta 1
+    psi = math.atan2(yc, xc)
+    phi = math.acos(d4/np.sqrt(xc**2 + yc**2))
+    theta1 = np.array([psi - phi + PI/2, psi + phi + PI/2])
+    T1 = np.array([limit_angle(theta1[0]), limit_angle(theta1[1])])
+    if shoulder == 'left':
+        theta1 = T1[0]
+    else:
+        theta1 = T1[1]
+
+    # Theta 5
+    P60 = np.dot(th, np.array([[0, 0, 0, 1]]).T)
+    x60 = P60[0][0]
+    y60 = P60[1][0]
+    z61 = x60*np.sin(T1) - y60*np.cos(T1)
+    T5 = np.array([np.arccos((z61 - d4)/d6), -np.arccos((z61 - d4)/d6)]).T
+    if shoulder == 'left':
+        T5 = T5[0]
+        if wrist == 'up':
+            theta5 = T5[0]
+        else:
+            theta5 = T5[1]
+    else:
+        T5 = T5[1]
+        if wrist == 'down':
+            theta5 = T5[0]
+        else:
+            theta5 = T5[1]
+
+    # Theta 6
+    th10 = transform(theta1, 0)
+    th01 = np.linalg.inv(th10)
+    th16 = np.linalg.inv(np.dot(th01, th))
+    z16_y = th16[1][2]
+    z16_x = th16[0][2]
+    theta6 = math.atan2(-z16_y/np.sin(theta5), z16_x/np.sin(theta5))+PI
+    theta6 = limit_angle(theta6)
+
+
+    # Theta 3
+    th61 = np.dot(th01, th)
+    th54 = transform(theta5, 4)
+    th65 = transform(theta6, 5)
+    inv = np.linalg.inv(np.dot(th54, th65))
+    th41 = np.dot(th61, inv)
+    p31 = np.dot(th41, np.array([[0, d4, 0, 1]]).T) - np.array([[0, 0, 0, 1]]).T
+
+    p31_x = p31[0][0]
+    p31_y = p31[1][0]
+    D = (p31_x**2 + p31_y**2 - a2**2 - a3**2)/(2*a2*a3)
+    T3 = np.array([math.atan2(-np.sqrt(1-D**2), D), math.atan2(np.sqrt(1-D**2), D)])
+    if shoulder == 'left':
+        if elbow == 'up':
+            theta3 = T3[0]
+        else:
+            theta3 = T3[1]
+    else:
+        if elbow == 'up':
+            theta3 = T3[1]
+        else:
+            theta3 = T3[0]
+
+
+    # Theta 2
+    delta = math.atan2(p31_x, p31_y)
+    epsilon = math.acos((a2**2 + p31_x**2 + p31_y**2 - a3**2)/(2*a2*np.sqrt(p31_x**2 + p31_y**2)))
+    T2 = np.array([ - delta + epsilon, - delta - epsilon])
+    if shoulder == 'left':
+        theta2 = T2[0]
+    else:
+        theta2 = T2[1]
+
+    # Theta 4
+    th21 = transform(theta2, 1)
+    th32 = transform(theta3, 2)
+    inv = np.linalg.inv(np.dot(th21, th32))
+    th43 = np.dot(inv, th41)
+    x43_x = th43[0][0]
+    x43_y = th43[1][0]
+    theta4 = math.atan2(x43_x, -x43_y)
+
+    return [theta1, theta2, theta3, theta4, theta5, theta6]
+
+
 class UR5:
     """
         This class initializes the UR5 parameters and defines the control and utility functions
@@ -139,24 +334,29 @@ class UR5:
         # DH Forward Kinematics
         self.frame0 = self.sim.getObject('/frame0')
         self.frame6 = self.sim.getObject('/frame6')
-        self._init_handles()
-        self.start_simulation()
-        # clear_output()
-        print('Pronto!')
 
-    def start_simulation(self):
-        """
-            This function starts the simulation
-        """
-        if self.sim.getSimulationState() != 17:
-            print('Iniciando simulação...')
-            self.sim.startSimulation()
+        # Computer Vision
+        self.model = None
+        self.folder = 'machine_learning/img/'
+        self.x_range = [0.1, -0.24]
+        self.y_range = [-0.83, -0.55]
+        self.x_img_range = [52, 184]
+        self.y_img_range = [52, 161]
+        self.z_cup = 0.05797996154999335
+
+        self._init_handles()
+        self.load_model()
+        self.start_simulation()
+        print('Pronto!')
 
     def _init_handles(self):
         """
-            This function obtains the joints, links and gripper handles
+            [internal usage] This function obtains the joints, links, gripper and camera handles
         """
-        print('Obtendo handles das juntas...')
+        print('Obtendo handles dos objetos...')
+        self.cup = self.sim.getObject('/Cup')
+        self.camera = self.sim.getObject('/Vision_sensor')
+        self.camera2 = self.sim.getObject('/Vision_sensor2')
         for i in range(1, 7):
             joint_handle = self.sim.getObject('/UR5_joint'+str(i))
             self.joint_handles.append(joint_handle)
@@ -184,196 +384,13 @@ class UR5:
                     finger_handle, self.sim.jointintparam_velocity_lock, 1)
                 self.sim.setJointTargetVelocity(finger_handle, 0.01)
 
-    def forward_kinematics(self, theta: 'list[float | int]'):
+    def start_simulation(self):
         """
-            Defines Denavit-Hartenberger parameters for UR5 and calculates
-            forward kinematics
-
-            Parameters:
-                theta (list[float | int]): joint angles in radians
-
-            Returns:
-                T (np.array): transformation matrix
+            This function starts the simulation
         """
-        d1 = 0.089159
-        a2 = 0.425
-        a3 = 0.39225
-        d4 = 0.10915
-        d5 = 0.09465
-        d6 = 0.17591
-        dh_table = np.array([[0, PI/2, d1, 0],
-                             [a2, 0, 0, PI/2],
-                             [a3, 0, 0, 0],
-                             [0, -PI/2, d4, -PI/2],
-                             [0, PI/2, d5, 0],
-                             [0, 0, d6, 0]])
-
-        A = np.array([np.array([[cos(theta[i]+dh_table[i][3]),
-                                 -sin(theta[i]+dh_table[i][3]) *
-                                 cos(dh_table[i][1]),
-                                 sin(theta[i]+dh_table[i][3]) *
-                                 sin(dh_table[i][1]),
-                                 dh_table[i][0]*cos(theta[i]+dh_table[i][3])],
-                                [sin(theta[i]+dh_table[i][3]),
-                                 cos(theta[i]+dh_table[i][3]) *
-                                 cos(dh_table[i][1]),
-                                 -cos(theta[i]+dh_table[i][3]) *
-                                 sin(dh_table[i][1]),
-                                 dh_table[i][0]*sin(theta[i]+dh_table[i][3])],
-                                [0, sin(dh_table[i][1]),
-                                 cos(dh_table[i][1]),
-                                 dh_table[i][2]],
-                                [0, 0, 0, 1]]) for i in range(6)])
-
-        T = reduce(np.dot, A)
-        return T, A
-
-    def transform(self, theta: 'int | float', idx):
-        """
-            Calculate the transformation matrix between two consecutive frames
-
-            Ex: T_0_1, T_1_2, T_2_3, T_3_4, T_4_5, T_5_6
-
-            Parameters:
-                theta (float | int): joint angle in radians
-                idx (int): index of the transformation matrix
-
-            Returns:
-                T (np.array): transformation matrix
-        """
-        d1 = 0.089159
-        a2 = 0.425
-        a3 = 0.39225
-        d4 = 0.10915
-        d5 = 0.09465
-        d6 = 0.17591
-        dh_table = np.array([[0, PI/2, d1, 0],
-                             [a2, 0, 0, PI/2],
-                             [a3, 0, 0, 0],
-                             [0, -PI/2, d4, -PI/2],
-                             [0, PI/2, d5, 0],
-                             [0, 0, d6, 0]])
-
-        th = np.array([[cos(theta+dh_table[idx][3]),
-                        -sin(theta+dh_table[idx][3]) *
-                        cos(dh_table[idx][1]),
-                        sin(theta+dh_table[idx][3]) *
-                        sin(dh_table[idx][1]),
-                        dh_table[idx][0]*cos(theta+dh_table[idx][3])],
-                       [sin(theta+dh_table[idx][3]),
-                        cos(theta+dh_table[idx][3]) *
-                        cos(dh_table[idx][1]),
-                        -cos(theta+dh_table[idx][3]) *
-                        sin(dh_table[idx][1]),
-                        dh_table[idx][0]*sin(theta+dh_table[idx][3])],
-                       [0, sin(dh_table[idx][1]),
-                        cos(dh_table[idx][1]),
-                        dh_table[idx][2]],
-                       [0, 0, 0, 1]])
-        return th
-
-    def inverse_kinematics(self, th: 'np.ndarray', shoulder='left', wrist='down', elbow='up'):
-        """
-            Calculates inverse kinematics for UR5
-
-            Parameters:
-                th (np.ndarray): transformation matrix
-                shoulder (str): 'left' or 'right'
-                wrist (str): 'up' or 'down'
-                elbow (str): 'up' or 'down'
-
-            Returns:
-                theta (list[float]): joint angles in radians
-        """
-        a2 = 0.425
-        a3 = 0.39225
-        d4 = 0.10915
-        d6 = 0.17591
-        o5 = th.dot(np.array([[0, 0, -d6, 1]]).T)
-        xc, yc, zc = o5[0][0], o5[1][0], o5[2][0]
-
-        # Theta 1
-        psi = math.atan2(yc, xc)
-        phi = math.acos(d4/np.sqrt(xc**2 + yc**2))
-        theta1 = np.array([psi - phi + PI/2, psi + phi + PI/2])
-        T1 = np.array([limit_angle(theta1[0]), limit_angle(theta1[1])])
-        if shoulder == 'left':
-            theta1 = T1[0]
-        else:
-            theta1 = T1[1]
-
-        # Theta 5
-        P60 = np.dot(th, np.array([[0, 0, 0, 1]]).T)
-        x60 = P60[0][0]
-        y60 = P60[1][0]
-        z61 = x60*np.sin(T1) - y60*np.cos(T1)
-        T5 = np.array([np.arccos((z61 - d4)/d6), -np.arccos((z61 - d4)/d6)]).T
-        if shoulder == 'left':
-            T5 = T5[0]
-            if wrist == 'up':
-                theta5 = T5[0]
-            else:
-                theta5 = T5[1]
-        else:
-            T5 = T5[1]
-            if wrist == 'down':
-                theta5 = T5[0]
-            else:
-                theta5 = T5[1]
-
-        # Theta 6
-        th10 = self.transform(theta1, 0)
-        th01 = np.linalg.inv(th10)
-        th16 = np.linalg.inv(np.dot(th01, th))
-        z16_y = th16[1][2]
-        z16_x = th16[0][2]
-        theta6 = math.atan2(-z16_y/np.sin(theta5), z16_x/np.sin(theta5))+PI
-        theta6 = limit_angle(theta6)
-
-
-        # Theta 3
-        th61 = np.dot(th01, th)
-        th54 = self.transform(theta5, 4)
-        th65 = self.transform(theta6, 5)
-        inv = np.linalg.inv(np.dot(th54, th65))
-        th41 = np.dot(th61, inv)
-        p31 = np.dot(th41, np.array([[0, d4, 0, 1]]).T) - np.array([[0, 0, 0, 1]]).T
-
-        p31_x = p31[0][0]
-        p31_y = p31[1][0]
-        D = (p31_x**2 + p31_y**2 - a2**2 - a3**2)/(2*a2*a3)
-        T3 = np.array([math.atan2(-np.sqrt(1-D**2), D), math.atan2(np.sqrt(1-D**2), D)])
-        if shoulder == 'left':
-            if elbow == 'up':
-                theta3 = T3[0]
-            else:
-                theta3 = T3[1]
-        else:
-            if elbow == 'up':
-                theta3 = T3[1]
-            else:
-                theta3 = T3[0]
-
-
-        # Theta 2
-        delta = math.atan2(p31_x, p31_y)
-        epsilon = math.acos((a2**2 + p31_x**2 + p31_y**2 - a3**2)/(2*a2*np.sqrt(p31_x**2 + p31_y**2)))
-        T2 = np.array([ - delta + epsilon, - delta - epsilon])
-        if shoulder == 'left':
-            theta2 = T2[0]
-        else:
-            theta2 = T2[1]
-
-        # Theta 4
-        th21 = self.transform(theta2, 1)
-        th32 = self.transform(theta3, 2)
-        inv = np.linalg.inv(np.dot(th21, th32))
-        th43 = np.dot(inv, th41)
-        x43_x = th43[0][0]
-        x43_y = th43[1][0]
-        theta4 = math.atan2(x43_x, -x43_y)
-
-        return [theta1, theta2, theta3, theta4, theta5, theta6]
+        if self.sim.getSimulationState() != 17:
+            print('Iniciando simulação...')
+            self.sim.startSimulation()
 
     def get_ground_truth(self):
         """
@@ -408,8 +425,7 @@ class UR5:
             from the joint velocities
 
             Parameters:
-                velocities (np.ndarray): do not assign any values when using as standalone
-                function
+                velocities (np.ndarray): do not assign any values when using as standalone function
 
             Returns:
                 qsi (np.ndarray): 6x1 vector containing 3 linear velocities (x, y, z) and
@@ -418,7 +434,7 @@ class UR5:
         angles = self.get_joint_angles(self.joint_handles)
         if velocities is None:
             velocities = np.array([self.sim.getJointVelocity(j) for j in self.joint_handles]).reshape((6,1))
-        _, A = self.forward_kinematics(angles)
+        _, A = forward_kinematics(angles)
         A10 = A[0]
         A20 = np.dot(A[0], A[1])
         A30 = np.dot(A20, A[2])
@@ -548,7 +564,7 @@ class UR5:
                 duration: time to reach position
         """
         T = build_matrix(pos, rot)
-        joint_angles = self.inverse_kinematics(T, wrist=wrist, shoulder='left', elbow='up')
+        joint_angles = inverse_kinematics(T, wrist=wrist, shoulder='left', elbow='up')
         if duration is not None:
             self.move_to_config(target=joint_angles, duration=duration)
         else:
@@ -584,48 +600,20 @@ class UR5:
             self.sim.setJointTargetVelocity(self.finger_handles[1], 0.04)
         time.sleep(1.5)
 
-
-def get_dataset(folder='machine_learning/img/'):
-    """
-        Get the dataset json with all labels and image paths
-
-        Parameters:
-            folder (string): dataset containing folder
-
-        Return:
-            data (list): list of json objects with keys ('x', 'y', 'x_img', 'y_img', 'raw_file')
-    """
-    data = []
-    with open(folder + 'ground_truth.json', 'r') as f:
-        for line in f:
-            data.append(json.loads(line))
-    return data
-
-
-class ComputerVision:
-
-    def __init__(self):
+    def get_cam_position(self):
         """
-            Initialize variables
-        """
-        self.model = None
-        client = RemoteAPIClient()
-        self.sim = client.getObject('sim')
-        self._get_handles()
-        self.folder = 'machine_learning/img/'
-        self.x_range = [0.1, -0.24]
-        self.y_range = [-0.83, -0.55]
-        self.x_img_range = [52, 184]
-        self.y_img_range = [52, 161]
-        self.z_cup = 0.05797996154999335
+            Get camera position
 
-    def _get_handles(self):
+            Return:
+                T (np.ndarray): camera transformation matrix
         """
-            Get object handles
-        """
-        self.cup = self.sim.getObject('/Cup')
-        self.camera = self.sim.getObject('/Vision_sensor')
-        self.frame0 = self.sim.getObject('/frame0')
+        _, A = forward_kinematics(self.get_joint_angles(self.joint_handles))
+        T = reduce(np.dot, A[:5])
+        cam_transf = np.dot(T, np.array([[1, 0, 0, 0],
+                                         [0, 1, 0, 0.0889],
+                                         [0, 0, 1, 0],
+                                         [0, 0, 0, 1]]))
+        return cam_transf
 
     def create_dataset(self, size=5000, folder=None):
         """
@@ -666,19 +654,6 @@ class ComputerVision:
         xc, yc = np.random.randint(0, 99, 2)
         self.sim.getObjectPosition(self.cup, self.frame0)
         self.sim.setObjectPosition(self.cup, self.frame0, [X[xc], Y[yc], self.z_cup])
-        img, resX, resY = self.sim.getVisionSensorCharImage(self.camera)
-        img = np.frombuffer(img, dtype=np.uint8).reshape((resY, resX, 3))
-        img = np.flip(img, axis=0)
-        img1 = img.copy()
-        limits = [(self.x_img_range[0], self.y_img_range[0]),
-                  (self.x_img_range[1], self.y_img_range[0]),
-                  (self.x_img_range[1], self.y_img_range[1]),
-                  (self.x_img_range[0], self.y_img_range[1])]
-        for i in range(2):
-            for j in range(2):
-                cv2.polylines(img1, np.int32([limits]), isClosed=True, color=(0, 255, 0), thickness=1)
-        plt.imshow(img1)
-        plt.show()
         return np.array(self.sim.getObjectPosition(self.cup, self.frame0))
 
     def load_model(self, model_path='machine_learning/cup_position_model.h5'):
@@ -706,13 +681,25 @@ class ComputerVision:
         prediction = prediction.astype(int)
         x = prediction[0][0]
         y = prediction[0][1]
+        print(x, y)
         img1 = img.copy()
         img1 = cv2.circle(img1, (x, y), 3, (255, 0, 0), -1)
         plt.imshow(img1)
-        x_normalized = (x - self.x_img_range[0]) / (self.x_img_range[1] - self.x_img_range[0])
-        y_normalized = (y - self.y_img_range[0]) / (self.y_img_range[1] - self.y_img_range[0])
-        x_real = self.x_range[0] + x_normalized * (self.x_range[1] - self.x_range[0])
-        y_real = self.y_range[0] + y_normalized * (self.y_range[1] - self.y_range[0])
+        img1 = np.asarray(img1* 255, dtype=np.uint8)
+        img1 = np.flip(img1, axis=0)
+        img1 = img1.tobytes()
+        self.sim.setVisionSensorCharImage(self.camera2, img1)
+        cam_position = self.get_cam_position()
+        height = cam_position[2][3]
+        x_cam = cam_position[0][3]
+        y_cam = cam_position[1][3]
+        alpha = np.deg2rad(30)
+        d = height * np.tan(alpha)
+        d_img = 256/2
+        dx = (x - d_img)*d/d_img
+        dy = (y - d_img)*d/d_img
+        x_real = (x_cam - dx)
+        y_real = (y_cam + dy)
         z_real = self.z_cup
         cup_position = np.array([x_real, y_real, z_real])
         return cup_position
