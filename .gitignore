@@ -1,2 +1,5 @@
 Projeto.pdf
 myvenv/
+__pycache__/
+.idea/
+machine_learning/img/
